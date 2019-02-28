@@ -19,7 +19,6 @@ import com.google.android.gms.maps.GoogleMapOptions;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.LatLngBounds;
 import com.google.android.gms.maps.model.MapStyleOptions;
-import com.google.maps.android.data.kml.KmlLayer;
 
 import java.util.Map;
 
@@ -47,12 +46,20 @@ public class AirMapManager extends ViewGroupManager<AirMapView> {
   );
 
   private final ReactApplicationContext appContext;
+  private AirMapMarkerManager markerManager = null;
 
   protected GoogleMapOptions googleMapOptions;
 
   public AirMapManager(ReactApplicationContext context) {
     this.appContext = context;
     this.googleMapOptions = new GoogleMapOptions();
+  }
+
+  public AirMapMarkerManager getMarkerManager() {
+    return this.markerManager;
+  }
+  public void setMarkerManager(AirMapMarkerManager markerManager) {
+    this.markerManager = markerManager;
   }
 
   @Override

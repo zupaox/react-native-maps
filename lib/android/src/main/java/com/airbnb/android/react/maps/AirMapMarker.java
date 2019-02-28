@@ -63,6 +63,9 @@ public class AirMapMarker extends AirMapFeature {
   private BitmapDescriptor iconBitmapDescriptor;
   private Bitmap iconBitmap;
 
+  // create a new variable to avoid break existing codes.
+  private BitmapDescriptor finalIconBitmapDescriptor;
+
   private float rotation = 0.0f;
   private boolean flat = false;
   private boolean draggable = false;
@@ -74,6 +77,8 @@ public class AirMapMarker extends AirMapFeature {
   private boolean calloutAnchorIsSet;
 
   private boolean hasCustomMarkerView = false;
+  private final AirMapMarkerManager markerManager;
+  private String imageUri = null;
 
   private final DraweeHolder<?> logoHolder;
   private DataSource<CloseableReference<CloseableImage>> dataSource;
@@ -105,20 +110,26 @@ public class AirMapMarker extends AirMapFeature {
               CloseableReference.closeSafely(imageReference);
             }
           }
+          if(AirMapMarker.this.markerManager != null) {
+            AirMapMarker.this.markerManager.getSharedIcon(AirMapMarker.this.imageUri)
+                .updateIcon(iconBitmapDescriptor, iconBitmap);
+          }
           update();
         }
       };
 
-  public AirMapMarker(Context context) {
+  public AirMapMarker(Context context, AirMapMarkerManager markerManager) {
     super(context);
     this.context = context;
+    this.markerManager = markerManager;
     logoHolder = DraweeHolder.create(createDraweeHierarchy(), context);
     logoHolder.onAttach();
   }
 
-  public AirMapMarker(Context context, MarkerOptions options) {
+  public AirMapMarker(Context context, MarkerOptions options, AirMapMarkerManager markerManager) {
     super(context);
     this.context = context;
+    this.markerManager = markerManager;
     logoHolder = DraweeHolder.create(createDraweeHierarchy(), context);
     logoHolder.onAttach();
 
@@ -264,6 +275,13 @@ public class AirMapMarker extends AirMapFeature {
   }
 
   public void setImage(String uri) {
+    this.imageUri = uri;
+    boolean loadImage = true;
+    if(this.markerManager != null) {
+      AirMapMarkerManager.AirMapMarkerSharedIcon sharedIcon = this.markerManager.getSharedIcon(uri);
+      loadImage = sharedIcon.addMarker(this);
+    }
+    if(!loadImage) {return;}
     if (uri == null) {
       iconBitmapDescriptor = null;
       update();
@@ -294,8 +312,16 @@ public class AirMapMarker extends AirMapFeature {
               drawable.draw(canvas);
           }
       }
+      if(this.markerManager != null) {
+        this.markerManager.getSharedIcon(uri).updateIcon(iconBitmapDescriptor, iconBitmap);
+      }
       update();
     }
+  }
+
+  public void setFinalIconBitmapDescriptor(BitmapDescriptor bitmapDescriptor) {
+    this.finalIconBitmapDescriptor = bitmapDescriptor;
+    this.update();
   }
 
   public MarkerOptions getMarkerOptions() {
@@ -332,7 +358,9 @@ public class AirMapMarker extends AirMapFeature {
   }
 
   private BitmapDescriptor getIcon() {
-    if (hasCustomMarkerView) {
+    if (this.finalIconBitmapDescriptor != null) {
+      return this.finalIconBitmapDescriptor;
+    }else if (hasCustomMarkerView) {
       // creating a bitmap from an arbitrary view
       if (iconBitmapDescriptor != null) {
         Bitmap viewBitmap = createDrawable();

@@ -1,5 +1,6 @@
 package com.airbnb.android.react.maps;
 
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.view.View;
 
@@ -10,11 +11,16 @@ import com.facebook.react.uimanager.LayoutShadowNode;
 import com.facebook.react.uimanager.ThemedReactContext;
 import com.facebook.react.uimanager.ViewGroupManager;
 import com.facebook.react.uimanager.annotations.ReactProp;
-import com.google.android.gms.maps.model.Marker;
+import com.google.android.gms.maps.model.BitmapDescriptor;
 import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.Marker;
 
+import java.lang.ref.WeakReference;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import javax.annotation.Nullable;
 
@@ -23,6 +29,75 @@ public class AirMapMarkerManager extends ViewGroupManager<AirMapMarker> {
   private static final int SHOW_INFO_WINDOW = 1;
   private static final int HIDE_INFO_WINDOW = 2;
   private static final int ANIMATE_MARKER_TO_COORDINATE = 3;
+
+  public static class AirMapMarkerSharedIcon {
+    private String imageUri;
+    private BitmapDescriptor iconBitmapDescriptor;
+    private Bitmap bitmap;
+    private List<WeakReference<AirMapMarker>> markers;
+    private boolean loadImageStarted;
+
+    public AirMapMarkerSharedIcon(String uri){
+      this.markers = new ArrayList<>();
+      this.imageUri = uri;
+      this.loadImageStarted = false;
+    }
+
+    /**
+     * subscribe icon update for given marker.
+     *
+     * The marker is wrapped in weakReference, so no need to remove it explicitly.
+     *
+     * When some other markers has already start loading the image, this method will return false
+     * so this marker do not need to load again.
+     *
+     * When this is the first marker added for this icon, the method will return true. So the marker
+     * Need to load the image.
+     *
+     * @param marker
+     * @return true when marker should try to load the image, false otherwise
+     */
+    public synchronized boolean addMarker(AirMapMarker marker) {
+      boolean loadStarted = this.loadImageStarted;
+      this.loadImageStarted = true;
+      this.markers.add(new WeakReference<AirMapMarker>(marker));
+      if(this.iconBitmapDescriptor != null) {
+        marker.setFinalIconBitmapDescriptor(this.iconBitmapDescriptor);
+      }
+      return !loadStarted;
+    }
+
+    public synchronized void updateIcon(BitmapDescriptor bitmapDescriptor, Bitmap bitmap) {
+      this.iconBitmapDescriptor = bitmapDescriptor;
+      this.bitmap = bitmap;
+      List<WeakReference<AirMapMarker>> newArray = new ArrayList<>();
+      for(WeakReference<AirMapMarker> weakMarker: markers) {
+        AirMapMarker marker = weakMarker.get();
+        if(marker != null) {
+          marker.setFinalIconBitmapDescriptor(bitmapDescriptor);
+          newArray.add(weakMarker);
+        }
+      }
+      this.markers = newArray;
+    }
+  }
+
+  private Map<String, AirMapMarkerSharedIcon> sharedIcons = new ConcurrentHashMap<>();
+
+  /**
+   * get the shared icon object, if not existed, create a new one and store it.
+   *
+   * @param uri
+   * @return the icon object for the given uri.
+   */
+  public AirMapMarkerSharedIcon getSharedIcon(String uri) {
+    AirMapMarkerSharedIcon icon = this.sharedIcons.get(uri);
+    if(icon == null) {
+      icon = new AirMapMarkerSharedIcon(uri);
+      this.sharedIcons.put(uri, icon);
+    }
+    return icon;
+  }
 
   public AirMapMarkerManager() {
   }
@@ -34,7 +109,7 @@ public class AirMapMarkerManager extends ViewGroupManager<AirMapMarker> {
 
   @Override
   public AirMapMarker createViewInstance(ThemedReactContext context) {
-    return new AirMapMarker(context);
+    return new AirMapMarker(context, this);
   }
 
   @ReactProp(name = "coordinate")
