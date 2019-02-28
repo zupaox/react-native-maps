@@ -1,7 +1,10 @@
 package com.airbnb.android.react.maps;
 
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Typeface;
 import android.view.View;
 
 import com.facebook.react.bridge.ReadableArray;
@@ -12,6 +15,7 @@ import com.facebook.react.uimanager.ThemedReactContext;
 import com.facebook.react.uimanager.ViewGroupManager;
 import com.facebook.react.uimanager.annotations.ReactProp;
 import com.google.android.gms.maps.model.BitmapDescriptor;
+import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.Marker;
 
@@ -31,54 +35,174 @@ public class AirMapMarkerManager extends ViewGroupManager<AirMapMarker> {
   private static final int ANIMATE_MARKER_TO_COORDINATE = 3;
 
   public static class AirMapMarkerSharedIcon {
-    private String imageUri;
+
+    // this is the bitmap descriptor for the image
     private BitmapDescriptor iconBitmapDescriptor;
+
+    // this is the bitmap for the image
     private Bitmap bitmap;
+
+    // this is the list of markers that shared the same image
     private List<WeakReference<AirMapMarker>> markers;
+
+    // this is the map to store texted bitmap descriptor, indexed by the corresponding text.
+    private Map<String, BitmapDescriptor> iconBitmapDescriptorsWithText;
+
+    // this is the map to store the corresponding markers that displays the marker text
+    // i.e. we allows different texts for same image
+    private Map<String, List<WeakReference<AirMapMarker>>> markersWithText;
+
+    // this is to denote whether the image fetching has started by any of the markers
+    // if it is already started, we do not need to fetch again.
     private boolean loadImageStarted;
 
-    public AirMapMarkerSharedIcon(String uri){
+    public AirMapMarkerSharedIcon(String uri) {
       this.markers = new ArrayList<>();
-      this.imageUri = uri;
+      this.markersWithText = new HashMap<>();
+      this.iconBitmapDescriptorsWithText = new HashMap<>();
       this.loadImageStarted = false;
+    }
+
+    // to check whether the image fetching process is started.
+    public synchronized boolean shouldLoadImage() {
+      if (!this.loadImageStarted) {
+        this.loadImageStarted = true;
+        return true;
+      }
+      return false;
     }
 
     /**
      * subscribe icon update for given marker.
-     *
+     * <p>
      * The marker is wrapped in weakReference, so no need to remove it explicitly.
      *
-     * When some other markers has already start loading the image, this method will return false
-     * so this marker do not need to load again.
-     *
-     * When this is the first marker added for this icon, the method will return true. So the marker
-     * Need to load the image.
-     *
      * @param marker
-     * @return true when marker should try to load the image, false otherwise
      */
-    public synchronized boolean addMarker(AirMapMarker marker) {
-      boolean loadStarted = this.loadImageStarted;
-      this.loadImageStarted = true;
-      this.markers.add(new WeakReference<AirMapMarker>(marker));
-      if(this.iconBitmapDescriptor != null) {
-        marker.setFinalIconBitmapDescriptor(this.iconBitmapDescriptor);
+    public void addMarker(AirMapMarker marker) {
+      synchronized (this) {
+        this.addToList(marker, this.markers);
       }
-      return !loadStarted;
+      if (this.iconBitmapDescriptor != null) {
+        marker.setIconBitmapDescriptor(this.iconBitmapDescriptor, this.bitmap);
+      }
     }
 
+    /**
+     * Subscribe icon update for given marker with the corresponding marker text.
+     *
+     * @param marker
+     * @param markerText
+     */
+    public void addMarker(AirMapMarker marker, String markerText) {
+
+      this.addMarker(marker);
+
+      // we need to add this marker into the corresponding list.
+      List<WeakReference<AirMapMarker>> markersWithSameText =
+          this.markersWithText.get(markerText);
+
+      if (markersWithSameText == null) {
+        markersWithSameText = new ArrayList<>();
+        this.markersWithText.put(markerText, markersWithSameText);
+      }
+
+      this.addToList(marker, markersWithSameText);
+
+      BitmapDescriptor iconWithText = this.iconBitmapDescriptorsWithText.get(markerText);
+      if (iconWithText != null) {
+        // we already have a texted bitmap desriptor, we use it directly.
+        marker.setIconBitmapDescriptorWithText(iconWithText);
+      }
+    }
+
+    /**
+     * update the bitmap descriptor and bitmap when the marker that fetch the image finished.
+     *
+     * This method will as well notify all the updated bitmap descriptor to all markers.
+     * @param bitmapDescriptor
+     * @param bitmap
+     */
     public synchronized void updateIcon(BitmapDescriptor bitmapDescriptor, Bitmap bitmap) {
       this.iconBitmapDescriptor = bitmapDescriptor;
       this.bitmap = bitmap;
       List<WeakReference<AirMapMarker>> newArray = new ArrayList<>();
-      for(WeakReference<AirMapMarker> weakMarker: markers) {
+      for (WeakReference<AirMapMarker> weakMarker : markers) {
         AirMapMarker marker = weakMarker.get();
-        if(marker != null) {
-          marker.setFinalIconBitmapDescriptor(bitmapDescriptor);
+        if (marker != null) {
+          marker.setIconBitmapDescriptor(bitmapDescriptor, bitmap);
           newArray.add(weakMarker);
         }
       }
       this.markers = newArray;
+    }
+
+    /**
+     * Get the texted bitmap descriptor with given marker text.
+     *
+     * If it is not already existed, we draw it and cache it.
+     * @param markerText
+     * @return
+     */
+    public synchronized BitmapDescriptor getTextedIcon(String markerText) {
+      if (markerText == null) {
+        return this.iconBitmapDescriptor;
+      }
+      BitmapDescriptor result;
+      if ((result = this.iconBitmapDescriptorsWithText.get(markerText)) != null) {
+        return result;
+      }
+      if (this.bitmap == null) {
+        return this.iconBitmapDescriptor;
+      }
+
+      result = this.drawTextOnBitmap(markerText, this.bitmap);
+      this.iconBitmapDescriptorsWithText.put(markerText, result);
+      return result;
+    }
+
+    /**
+     * helper method to draw text on bitmap.
+     *
+     * currently it uses some hardcoded parameters.
+     * if we want to have custom parameters, we can't cache bitmap result by marker text.
+     *
+     * one possible solution is to create another markerTextKey prop to identify them. And if
+     * not provided, we use markerText as key directly.
+     *
+     * @param text
+     * @param bitmap
+     * @return
+     */
+    private BitmapDescriptor drawTextOnBitmap(String text, Bitmap bitmap) {
+      Bitmap newBitmap = Bitmap.createBitmap(bitmap);
+      Canvas canvas = new Canvas(newBitmap);
+      Paint paint = new Paint();
+      paint.setColor(Color.WHITE);
+      paint.setTextSize(30);
+      paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+      int height = bitmap.getHeight();
+      canvas.drawText(text, 15, height / 2, paint);
+      return BitmapDescriptorFactory.fromBitmap(newBitmap);
+    }
+
+    /**
+     * helper method to wrap a marker using WeakReference and add it
+     * into a list if it is not already added.
+     *
+     * We use weak reference because we don't want to hold the marker if it is been removed from map.
+     * We don't want to have manual remove needed.
+     *
+     * @param marker
+     * @param list
+     */
+    private void addToList(AirMapMarker marker, List<WeakReference<AirMapMarker>> list) {
+      for (WeakReference<AirMapMarker> weakMarkers : list) {
+        if (weakMarkers.get() == marker) {
+          return;
+        }
+      }
+      list.add(new WeakReference<AirMapMarker>(marker));
     }
   }
 
@@ -91,8 +215,11 @@ public class AirMapMarkerManager extends ViewGroupManager<AirMapMarker> {
    * @return the icon object for the given uri.
    */
   public AirMapMarkerSharedIcon getSharedIcon(String uri) {
+    if (uri == null) {
+      return null;
+    }
     AirMapMarkerSharedIcon icon = this.sharedIcons.get(uri);
-    if(icon == null) {
+    if (icon == null) {
       icon = new AirMapMarkerSharedIcon(uri);
       this.sharedIcons.put(uri, icon);
     }
@@ -208,6 +335,11 @@ public class AirMapMarkerManager extends ViewGroupManager<AirMapMarker> {
     view.setOpacity(opacity);
   }
 
+  @ReactProp(name = "markerText")
+  public void setMarkerText(AirMapMarker view, String markerText) {
+    view.setMarkerText(markerText);
+  }
+
   @Override
   public void addView(AirMapMarker parent, View child, int index) {
     // if an <Callout /> component is a child, then it is a callout view, NOT part of the
@@ -232,7 +364,7 @@ public class AirMapMarkerManager extends ViewGroupManager<AirMapMarker> {
     return MapBuilder.of(
         "showCallout", SHOW_INFO_WINDOW,
         "hideCallout", HIDE_INFO_WINDOW,
-        "animateMarkerToCoordinate",  ANIMATE_MARKER_TO_COORDINATE
+        "animateMarkerToCoordinate", ANIMATE_MARKER_TO_COORDINATE
     );
   }
 
@@ -251,7 +383,7 @@ public class AirMapMarkerManager extends ViewGroupManager<AirMapMarker> {
       case HIDE_INFO_WINDOW:
         ((Marker) view.getFeature()).hideInfoWindow();
         break;
-      
+
       case ANIMATE_MARKER_TO_COORDINATE:
         region = args.getMap(0);
         duration = args.getInt(1);

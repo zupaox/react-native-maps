@@ -62,9 +62,7 @@ public class AirMapMarker extends AirMapFeature {
   private float markerHue = 0.0f; // should be between 0 and 360
   private BitmapDescriptor iconBitmapDescriptor;
   private Bitmap iconBitmap;
-
-  // create a new variable to avoid break existing codes.
-  private BitmapDescriptor finalIconBitmapDescriptor;
+  private BitmapDescriptor iconBitmapDescriptorWithMarkerText;
 
   private float rotation = 0.0f;
   private boolean flat = false;
@@ -79,6 +77,7 @@ public class AirMapMarker extends AirMapFeature {
   private boolean hasCustomMarkerView = false;
   private final AirMapMarkerManager markerManager;
   private String imageUri = null;
+  private String markerText = null;
 
   private final DraweeHolder<?> logoHolder;
   private DataSource<CloseableReference<CloseableImage>> dataSource;
@@ -110,7 +109,7 @@ public class AirMapMarker extends AirMapFeature {
               CloseableReference.closeSafely(imageReference);
             }
           }
-          if(AirMapMarker.this.markerManager != null) {
+          if (AirMapMarker.this.markerManager != null && AirMapMarker.this.imageUri != null) {
             AirMapMarker.this.markerManager.getSharedIcon(AirMapMarker.this.imageUri)
                 .updateIcon(iconBitmapDescriptor, iconBitmap);
           }
@@ -266,22 +265,27 @@ public class AirMapMarker extends AirMapFeature {
     };
     Property<Marker, LatLng> property = Property.of(Marker.class, LatLng.class, "position");
     ObjectAnimator animator = ObjectAnimator.ofObject(
-      marker,
-      property,
-      typeEvaluator,
-      finalPosition);
+        marker,
+        property,
+        typeEvaluator,
+        finalPosition);
     animator.setDuration(duration);
     animator.start();
   }
 
   public void setImage(String uri) {
     this.imageUri = uri;
-    boolean loadImage = true;
-    if(this.markerManager != null) {
+    if (this.markerManager != null && uri != null) {
       AirMapMarkerManager.AirMapMarkerSharedIcon sharedIcon = this.markerManager.getSharedIcon(uri);
-      loadImage = sharedIcon.addMarker(this);
+      if (this.markerText != null) {
+        sharedIcon.addMarker(this, this.markerText);
+      } else {
+        sharedIcon.addMarker(this);
+      }
+      if (!sharedIcon.shouldLoadImage()) {
+        return;
+      }
     }
-    if(!loadImage) {return;}
     if (uri == null) {
       iconBitmapDescriptor = null;
       update();
@@ -302,26 +306,40 @@ public class AirMapMarker extends AirMapFeature {
     } else {
       iconBitmapDescriptor = getBitmapDescriptorByName(uri);
       if (iconBitmapDescriptor != null) {
-          int drawableId = getDrawableResourceByName(uri);
-          iconBitmap = BitmapFactory.decodeResource(getResources(), drawableId);
-          if (iconBitmap == null) { // VectorDrawable or similar
-              Drawable drawable = getResources().getDrawable(drawableId);
-              iconBitmap = Bitmap.createBitmap(drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight(), Bitmap.Config.ARGB_8888);
-              drawable.setBounds(0, 0, drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight());
-              Canvas canvas = new Canvas(iconBitmap);
-              drawable.draw(canvas);
-          }
+        int drawableId = getDrawableResourceByName(uri);
+        iconBitmap = BitmapFactory.decodeResource(getResources(), drawableId);
+        if (iconBitmap == null) { // VectorDrawable or similar
+          Drawable drawable = getResources().getDrawable(drawableId);
+          iconBitmap = Bitmap.createBitmap(drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight(), Bitmap.Config.ARGB_8888);
+          drawable.setBounds(0, 0, drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight());
+          Canvas canvas = new Canvas(iconBitmap);
+          drawable.draw(canvas);
+        }
       }
-      if(this.markerManager != null) {
+      if (this.markerManager != null && uri != null) {
         this.markerManager.getSharedIcon(uri).updateIcon(iconBitmapDescriptor, iconBitmap);
       }
       update();
     }
   }
 
-  public void setFinalIconBitmapDescriptor(BitmapDescriptor bitmapDescriptor) {
-    this.finalIconBitmapDescriptor = bitmapDescriptor;
+  public void setIconBitmapDescriptor(BitmapDescriptor bitmapDescriptor, Bitmap bitmap) {
+    this.iconBitmapDescriptor = bitmapDescriptor;
+    this.iconBitmap = bitmap;
     this.update();
+  }
+
+  public void setIconBitmapDescriptorWithText(BitmapDescriptor bitmapDescriptor) {
+    this.iconBitmapDescriptorWithMarkerText = bitmapDescriptor;
+    this.update();
+  }
+
+  public void setMarkerText(String markerText) {
+    this.markerText = markerText;
+    if (this.markerManager != null && this.imageUri != null) {
+      this.markerManager.getSharedIcon(this.imageUri).addMarker(this, markerText);
+      this.update();
+    }
   }
 
   public MarkerOptions getMarkerOptions() {
@@ -358,9 +376,7 @@ public class AirMapMarker extends AirMapFeature {
   }
 
   private BitmapDescriptor getIcon() {
-    if (this.finalIconBitmapDescriptor != null) {
-      return this.finalIconBitmapDescriptor;
-    }else if (hasCustomMarkerView) {
+    if (hasCustomMarkerView) {
       // creating a bitmap from an arbitrary view
       if (iconBitmapDescriptor != null) {
         Bitmap viewBitmap = createDrawable();
@@ -374,8 +390,9 @@ public class AirMapMarker extends AirMapFeature {
       } else {
         return BitmapDescriptorFactory.fromBitmap(createDrawable());
       }
+    } else if (this.markerText != null && this.markerManager != null && this.imageUri != null) {
+      return this.markerManager.getSharedIcon(imageUri).getTextedIcon(this.markerText);
     } else if (iconBitmapDescriptor != null) {
-      // use local image as a marker
       return iconBitmapDescriptor;
     } else {
       // render the default marker pin
