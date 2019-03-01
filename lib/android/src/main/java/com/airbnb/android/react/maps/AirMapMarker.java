@@ -388,6 +388,7 @@ public class AirMapMarker extends AirMapFeature {
 
   public void setIconBitmapDescriptor(BitmapDescriptor bitmapDescriptor) {
     this.iconBitmapDescriptor = bitmapDescriptor;
+    this.hasViewChanges = true;
     this.update(true);
   }
 
