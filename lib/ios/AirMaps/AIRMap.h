@@ -29,6 +29,7 @@ extern const NSInteger AIRMapMaxZoomLevel;
 @property (nonatomic, strong) UIView *loadingView;
 
 @property (nonatomic, copy) NSString *userLocationAnnotationTitle;
+@property (nonatomic, strong) UIImage *userLocationHeadingImage;
 @property (nonatomic, assign) BOOL followUserLocation;
 @property (nonatomic, assign) BOOL hasStartedRendering;
 @property (nonatomic, assign) BOOL cacheEnabled;

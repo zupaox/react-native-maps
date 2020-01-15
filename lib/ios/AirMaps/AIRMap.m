@@ -516,6 +516,11 @@ const NSInteger AIRMapMaxZoomLevel = 20;
     [self updateZoomEnabled];
 }
 
+
+- (void)setUserLocationHeadingImageName:(NSString *)imageName {
+    self.userLocationHeadingImage = [UIImage imageNamed:imageName];
+}
+
 - (void)updateZoomEnabled {
     if (self.cacheEnabled) {
         [super setZoomEnabled: NO];

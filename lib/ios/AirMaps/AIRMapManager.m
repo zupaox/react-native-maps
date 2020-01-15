@@ -42,7 +42,8 @@ static NSString *const RCTMapViewKey = @"MapView";
 @end
 
 @implementation AIRMapManager{
-   BOOL _hasObserver;
+    BOOL _hasObserver;
+    UIImageView * _userHeadingImageView;
 }
 
 RCT_EXPORT_MODULE()
@@ -87,6 +88,7 @@ RCT_REMAP_VIEW_PROPERTY(testID, accessibilityIdentifier, NSString)
 RCT_EXPORT_VIEW_PROPERTY(showsUserLocation, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(userLocationAnnotationTitle, NSString)
 RCT_EXPORT_VIEW_PROPERTY(followsUserLocation, BOOL)
+RCT_EXPORT_VIEW_PROPERTY(userLocationHeadingImageName, NSString)
 RCT_EXPORT_VIEW_PROPERTY(showsPointsOfInterest, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(showsBuildings, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(showsCompass, BOOL)
@@ -292,6 +294,24 @@ RCT_EXPORT_METHOD(animateToNavigation:(nonnull NSNumber *)reactTag
             [AIRMap animateWithDuration:duration/1000 animations:^{
                 [(AIRMap *)view setRegion:region animated:YES];
                 [mapView setCamera:mapCamera animated:YES];
+            }];
+        }
+    }];
+}
+
+
+RCT_EXPORT_METHOD(updateUserHeading:(nonnull NSNumber *)reactTag
+        withHeading:(CGFloat)headingAngle)
+{
+    if (!_userHeadingImageView) {
+        return;
+    }
+    
+    [self.bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, NSDictionary<NSNumber *, UIView *> *viewRegistry) {
+        CGAffineTransform transform = CGAffineTransformMakeRotation(headingAngle);
+        if(self->_userHeadingImageView) {
+            [AIRMap animateWithDuration:0.3 animations:^{
+                self->_userHeadingImageView.transform = transform;
             }];
         }
     }];
@@ -845,6 +865,43 @@ RCT_EXPORT_METHOD(coordinateForPoint:(nonnull NSNumber *)reactTag
         [(MKUserLocation*)view.annotation setTitle: mapView.userLocationAnnotationTitle];
     }
 
+}
+
+- (void)mapView:(MKMapView *)mapView didAddAnnotationViews:(NSArray<MKAnnotationView *> *)views {
+    
+    // finding User location view and insert the heading image view to it
+    // we hold a reference to the image view so that we can transform on it
+    if(_userHeadingImageView) {
+        return;
+    }
+    
+    AIRMap *airMap = (AIRMap *)mapView;
+    
+    // we only insert the heading image when:
+    // 1. an image has been configured to be inserted
+    // 2. map rotation is not enabled. This is because if map rotated,
+    //    the transformation will not work correctly
+    if(!airMap || !airMap.userLocationHeadingImage || airMap.rotateEnabled) {
+        return;
+    }
+    
+    for (int i = 0; i < views.count; i++) {
+        MKAnnotationView *annotationView = views[i];
+        if ([annotationView.annotation isKindOfClass: [MKUserLocation class]]) {
+            UIImage *headingImage = airMap.userLocationHeadingImage;
+            MKAnnotationView *userLocationView = annotationView;
+            _userHeadingImageView = [[UIImageView alloc] initWithImage:headingImage];
+            // our taget is to map the image center to the userAnnoataionView center
+            CGFloat x = userLocationView.frame.size.width / 2;
+            CGFloat y = userLocationView.frame.size.height / 2;
+            CGFloat width = headingImage.size.width;
+            CGFloat height = headingImage.size.height;
+            _userHeadingImageView.frame = CGRectMake(0, 0, width, height);
+            _userHeadingImageView.center = CGPointMake(x, y);
+            [userLocationView insertSubview:_userHeadingImageView atIndex:0];
+            break;
+        }
+    }
 }
 
 - (void)mapView:(AIRMap *)mapView didDeselectAnnotationView:(MKAnnotationView *)view {
